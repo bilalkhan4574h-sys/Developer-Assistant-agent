@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Research Assistant UI</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <h1>Research Assistant</h1>
+    <p>Manage and invoke tools dynamically from config files.</p>
+  </header>
+  <main>
+    <section id="tools">
+      <h2>Available Tools</h2>
+      <div id="tool-list"></div>
+    </section>
+
+    <section id="invoke">
+      <h2>Invoke Tool</h2>
+      <select id="invoke-tool"></select>
+      <div id="params-area"></div>
+      <button id="invoke-btn">Invoke</button>
+      <pre id="invoke-result"></pre>
+    </section>
+
+    <section id="search">
+      <h2>Research Search</h2>
+      <input id="search-query" placeholder="Enter search query" style="width:80%">
+      <button id="search-btn">Search</button>
+      <div id="search-results"></div>
+    </section>
+
+    <section id="config">
+      <h2>Edit Config (JSON)</h2>
+      <textarea id="config-editor" rows="18"></textarea>
+      <button id="save-config">Save Config</button>
+    </section>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>

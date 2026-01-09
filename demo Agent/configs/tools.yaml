@@ -1,0 +1,20 @@
+tools:
+  - name: github_repo_search_yaml
+    description: "GitHub repo search (YAML-defined)"
+    type: rest
+    endpoint: "https://api.github.com/search/repositories"
+    method: GET
+    params:
+      q: "language:python"
+      per_page: 2
+
+  - name: stack_overflow_search_yaml
+    description: "StackOverflow search (YAML-defined)"
+    type: rest
+    endpoint: "https://api.stackexchange.com/2.3/search/advanced"
+    method: GET
+    params:
+      order: "desc"
+      sort: "relevance"
+      site: "stackoverflow"
+      pagesize: 2

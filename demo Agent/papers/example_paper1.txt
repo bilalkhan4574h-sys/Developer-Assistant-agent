@@ -1,0 +1,5 @@
+Title: Example Paper on AI Research
+
+This is a short example paper used to demonstrate the Research Assistant search feature.
+It discusses transformer models, evaluation, and reproducibility in machine learning research.
+Key topics include: transformers, pretraining, datasets, and metrics.

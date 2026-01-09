@@ -1,0 +1,35 @@
+{
+  "tools": [
+    {
+      "name": "github_repo_search",
+      "description": "Search GitHub repositories by query",
+      "type": "rest",
+      "endpoint": "https://api.github.com/search/repositories",
+      "method": "GET",
+      "params": { "q": "language:python", "per_page": 3 }
+    },
+    {
+      "name": "stack_overflow_search",
+      "description": "Fetch StackOverflow questions matching a query",
+      "type": "rest",
+      "endpoint": "https://api.stackexchange.com/2.3/search/advanced",
+      "method": "GET",
+      "params": { "order": "desc", "sort": "relevance", "site": "stackoverflow", "pagesize": 3 }
+    },
+    {
+      "name": "code_formatter",
+      "description": "Format Python code locally",
+      "type": "local",
+      "function": "code_formatter",
+      "params": { "style": "simple" }
+    }
+    ,
+    {
+      "name": "research_search",
+      "description": "Local research search over papers/ folder",
+      "type": "local",
+      "function": "research_search",
+      "params": { "top_k": 5 }
+    }
+  ]
+}
