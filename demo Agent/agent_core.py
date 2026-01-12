@@ -50,7 +50,39 @@ class MockMcpToolRegistrationService:
         return handler(**kwargs)
 
 
-McpService = MockMcpToolRegistrationService
+# Try to detect the real Microsoft Agent Framework MCP class.
+MCP_MODULE = os.environ.get("MCP_MODULE")
+RealMcp = None
+tried = []
+
+# if user provided explicit module path, try it first
+if MCP_MODULE:
+    tried.append(MCP_MODULE)
+    try:
+        mod = __import__(MCP_MODULE, fromlist=["McpToolRegistrationService"])
+        RealMcp = getattr(mod, "McpToolRegistrationService", None)
+    except Exception:
+        RealMcp = None
+
+# common plausible import paths to try
+if RealMcp is None:
+    for p in ("mscopilot.mcp", "microsoft.agent.mcp", "microsoft.agentframework.mcp", "microsoft.agent_sdk.mcp"):
+        tried.append(p)
+        try:
+            mod = __import__(p, fromlist=["McpToolRegistrationService"])
+            RealMcp = getattr(mod, "McpToolRegistrationService", None)
+            if RealMcp:
+                logger.info("Loaded McpToolRegistrationService from %s", p)
+                break
+        except Exception:
+            RealMcp = None
+
+if RealMcp:
+    McpService = RealMcp
+    logger.info("Using Microsoft Agent Framework McpToolRegistrationService (real SDK).")
+else:
+    McpService = MockMcpToolRegistrationService
+    logger.info("Microsoft Agent Framework SDK not found (tried: %s); using mock service.", ", ".join(tried))
 
 
 class ToolRegistry:
