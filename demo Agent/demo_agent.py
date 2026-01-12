@@ -43,6 +43,7 @@ import logging
 import copy
 import requests
 from typing import Dict, Any, Callable, Optional, List
+from flask import Flask, request, jsonify
 
 # Watchdog imports for file watching
 try:
@@ -151,7 +152,10 @@ class ToolRegistry:
                     parsed = json.loads(text)
                 else:
                     parsed = yaml.safe_load(text)
-                if isinstance(parsed, dict) and "tools" in parsed:
+                # If this looks like an OpenAPI/Swagger document, convert to tool entries
+                if isinstance(parsed, dict) and ("openapi" in parsed or "swagger" in parsed):
+                    entries = self._convert_openapi(parsed)
+                elif isinstance(parsed, dict) and "tools" in parsed:
                     entries = parsed["tools"]
                 else:
                     entries = parsed
@@ -204,6 +208,66 @@ class ToolRegistry:
                 raise ValueError("Local tool requires 'function' string name")
             spec.update({"function": function_name, "params": raw.get("params", {})})
         return spec
+
+    def _convert_openapi(self, spec: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """
+        Convert an OpenAPI (v3) or Swagger (v2) spec dict into a list of tool entries
+        compatible with the ToolRegistry format. Each operation is turned into a
+        REST tool whose `endpoint` is the server URL + path and method is the HTTP verb.
+        OperationId is used as the tool `name` when present; otherwise a name is
+        generated from method and path.
+        """
+        entries: List[Dict[str, Any]] = []
+        # Determine server base URL(s)
+        servers = []
+        if "servers" in spec and isinstance(spec["servers"], list):
+            for s in spec["servers"]:
+                url = s.get("url") if isinstance(s, dict) else None
+                if url:
+                    servers.append(url.rstrip("/"))
+        # Fallback to host/basePath for swagger 2.0
+        if not servers and spec.get("swagger") == "2.0":
+            host = spec.get("host", "")
+            basePath = spec.get("basePath", "")
+            if host:
+                servers.append((host + basePath).rstrip("/"))
+        # Use empty string if no server provided (caller must provide absolute URLs in paths)
+        if not servers:
+            servers = [""]
+
+        paths = spec.get("paths", {}) or {}
+        for path, methods in paths.items():
+            for method, op in (methods.items() if isinstance(methods, dict) else []):
+                if method.lower() not in ("get", "post", "put", "delete", "patch"):
+                    continue
+                op: Dict[str, Any] = op or {}
+                name = op.get("operationId") or f"{method.lower()}_{path.strip('/').replace('/', '_').replace('{','').replace('}','') or 'root'}"
+                summary = op.get("summary") or op.get("description") or ""
+                # Build params dict defaults (query/path) with empty values
+                params: Dict[str, Any] = {}
+                for p in op.get("parameters", []) or []:
+                    pname = p.get("name")
+                    if not pname:
+                        continue
+                    # mark required vs optional in description schema
+                    params[pname] = p.get("schema") or p.get("example") or p.get("default") or None
+                # If requestBody exists, include a 'body' param key
+                if op.get("requestBody"):
+                    params["body"] = None
+
+                # Use first server as base
+                base = servers[0]
+                endpoint = base + path
+                entry = {
+                    "name": name,
+                    "description": summary,
+                    "type": "rest",
+                    "endpoint": endpoint,
+                    "method": method.upper(),
+                    "params": params,
+                }
+                entries.append(entry)
+        return entries
 
 # -------------------------
 # AgentManager
@@ -514,6 +578,91 @@ def ensure_example_configs(json_path: str, yaml_path: str):
     else:
         logger.info("YAML config already exists at %s", yaml_path)
 
+
+def build_openapi_from_manager(manager: AgentManager) -> Dict[str, Any]:
+    """
+    Build a minimal OpenAPI v3 document describing the currently registered tools.
+    Each tool is exposed as a POST `/invoke/{tool_name}` operation accepting a
+    JSON object with the tool's parameters.
+    """
+    doc: Dict[str, Any] = {
+        "openapi": "3.0.0",
+        "info": {"title": "Demo Agent Tools API", "version": "0.1.0"},
+        "paths": {},
+        "components": {"schemas": {}},
+    }
+    for name, spec in manager.registered.items():
+        path = f"/invoke/{name}"
+        params = spec.get("params", {}) or {}
+        properties = {}
+        required = []
+        # params may be dict of paramName -> default/schema
+        for k, v in params.items():
+            properties[k] = {"type": "string"}
+        schema = {"type": "object", "properties": properties}
+        doc["paths"][path] = {
+            "post": {
+                "summary": spec.get("description", ""),
+                "operationId": name,
+                "requestBody": {
+                    "content": {
+                        "application/json": {"schema": schema}
+                    },
+                    "required": False,
+                },
+                "responses": {
+                    "200": {"description": "Invocation result", "content": {"application/json": {"schema": {"type": "object"}}}}
+                },
+            }
+        }
+    return doc
+
+
+def start_openapi_server(manager: AgentManager, host: str = "127.0.0.1", port: int = 5001):
+    app = Flask("demo-agent-tools")
+
+    @app.route("/openapi.json", methods=["GET"])
+    def openapi():
+        doc = build_openapi_from_manager(manager)
+        return jsonify(doc)
+
+    @app.route("/invoke/<tool_name>", methods=["POST"])
+    def invoke_tool(tool_name: str):
+        body = {}
+        try:
+            if request.is_json:
+                body = request.get_json()
+        except Exception:
+            body = {}
+        # Ensure tool exists
+        if tool_name not in manager.registered:
+            return jsonify({"error": "tool not found"}), 404
+        try:
+            # Use the registration service invoke if available, else call via manager
+            if hasattr(manager.service, "invoke"):
+                res = manager.service.invoke(tool_name, **(body or {}))
+            else:
+                # Fall back to constructing handler from spec and calling
+                # Use manager._make_rest_handler/_make_local_handler as last resort
+                spec = manager.registered[tool_name]
+                if spec["type"] == "rest":
+                    handler = manager._make_rest_handler(spec)
+                else:
+                    handler = manager._make_local_handler(spec)
+                res = handler(**(body or {}))
+            return jsonify({"status": "ok", "result": res})
+        except Exception as ex:
+            logger.exception("Error invoking tool %s: %s", tool_name, ex)
+            return jsonify({"status": "error", "error": str(ex)}), 500
+
+    # Run Flask in a background thread
+    def run_app():
+        app.run(host=host, port=port, debug=False, use_reloader=False)
+
+    t = threading.Thread(target=run_app, daemon=True)
+    t.start()
+    logger.info("Started OpenAPI tools server at http://%s:%d/openapi.json", host, port)
+
 # -------------------------
 # Demo: start agent, watch configs, and demonstrate dynamic addition
 # -------------------------
@@ -572,6 +721,12 @@ def main():
     # Start watcher
     watcher = ConfigWatcher(registry, manager, [json_path, yaml_path])
     watcher.start()
+
+    # Start OpenAPI tools server (exposes /openapi.json and /invoke/<tool>)
+    try:
+        start_openapi_server(manager, host="127.0.0.1", port=5001)
+    except Exception:
+        logger.exception("Failed to start OpenAPI server")
 
     # Start demo action in background: add DockerHub tool after delay
     demo_thread = threading.Thread(target=demo_dynamic_addition, args=(json_path, 8), daemon=True)

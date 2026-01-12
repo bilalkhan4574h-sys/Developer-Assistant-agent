@@ -1,0 +1,38 @@
+openapi: "3.0.0"
+info:
+  title: Demo Tools OpenAPI
+  version: "0.1.0"
+servers:
+  - url: "https://api.example.com"
+paths:
+  /weather:
+    get:
+      operationId: getWeather
+      summary: Get weather for a city
+      parameters:
+        - name: city
+          in: query
+          required: true
+          schema:
+            type: string
+  /Location:
+    get:
+      operationId: getLocation
+      summary: Get location by IP
+      parameters:
+        - name: city
+          in: query
+          required: true
+          schema:
+            type: string          
+  
+  /signals:
+    get:
+      operationId: getSignals
+      summary: Retrieve signals list
+      parameters:
+        - name: type
+          in: query
+          required: false
+          schema:
+            type: string

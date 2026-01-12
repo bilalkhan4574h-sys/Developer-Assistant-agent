@@ -17,15 +17,16 @@ BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 CONFIG_DIR = os.path.join(BASE_DIR, "configs")
 JSON_PATH = os.path.join(CONFIG_DIR, "tools.json")
 YAML_PATH = os.path.join(CONFIG_DIR, "tools.yaml")
+OPENAPI_PATH = os.path.join(CONFIG_DIR, "openapi.yaml")
 
 app = Flask(__name__, template_folder="templates", static_folder="static")
 
 # Initialize agent components
-registry = ToolRegistry([JSON_PATH, YAML_PATH])
+registry = ToolRegistry([JSON_PATH, YAML_PATH, OPENAPI_PATH])
 manager = AgentManager()
 loaded = registry.load_all()
 manager.update_tools(loaded)
-watcher = ConfigWatcher(registry, manager, [JSON_PATH, YAML_PATH])
+watcher = ConfigWatcher(registry, manager, [JSON_PATH, YAML_PATH, OPENAPI_PATH])
 watcher.start()
 
 @app.route('/')
@@ -71,7 +72,12 @@ def api_invoke():
 @app.route('/api/config', methods=['GET'])
 def api_get_config():
     path = request.args.get('path', 'json')
-    target = JSON_PATH if path == 'json' else YAML_PATH
+    if path == 'json':
+        target = JSON_PATH
+    elif path == 'yaml':
+        target = YAML_PATH
+    else:
+        target = OPENAPI_PATH
     try:
         with open(target, 'r', encoding='utf-8') as f:
             text = f.read()
@@ -87,7 +93,12 @@ def api_save_config():
     content = body.get('content')
     if content is None:
         return jsonify({'status': 'error', 'error': 'Missing content'}), 400
-    target = JSON_PATH if path == 'json' else YAML_PATH
+    if path == 'json':
+        target = JSON_PATH
+    elif path == 'yaml':
+        target = YAML_PATH
+    else:
+        target = OPENAPI_PATH
     try:
         with open(target, 'w', encoding='utf-8') as f:
             f.write(content)

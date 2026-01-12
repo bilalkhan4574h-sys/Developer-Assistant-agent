@@ -71,7 +71,13 @@ class ToolRegistry:
                     parsed = json.loads(text)
                 else:
                     parsed = yaml.safe_load(text)
-                entries = parsed.get('tools') if isinstance(parsed, dict) and 'tools' in parsed else parsed
+                # If OpenAPI/Swagger document, convert to tool entries
+                if isinstance(parsed, dict) and ("openapi" in parsed or "swagger" in parsed):
+                    logger.info("Detected OpenAPI/Swagger document at %s; converting to tools", path)
+                    entries = self._convert_openapi(parsed)
+                    logger.info("Converted %d operations from OpenAPI at %s", len(entries), path)
+                else:
+                    entries = parsed.get('tools') if isinstance(parsed, dict) and 'tools' in parsed else parsed
                 if not isinstance(entries, list):
                     logger.error("Config at %s must contain a list of tool entries", path)
                     continue
@@ -85,6 +91,59 @@ class ToolRegistry:
                 logger.exception("Failed to read/parse config %s: %s", path, ex)
         self.tools = loaded
         return loaded
+
+    def _convert_openapi(self, spec: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """
+        Convert an OpenAPI (v3) or Swagger (v2) spec dict into a list of tool entries
+        compatible with the ToolRegistry format. Each operation is turned into a
+        REST tool whose `endpoint` is the server URL + path and method is the HTTP verb.
+        OperationId is used as the tool `name` when present; otherwise a name is
+        generated from method and path.
+        """
+        entries: List[Dict[str, Any]] = []
+        servers = []
+        if "servers" in spec and isinstance(spec["servers"], list):
+            for s in spec["servers"]:
+                url = s.get("url") if isinstance(s, dict) else None
+                if url:
+                    servers.append(url.rstrip("/"))
+        if not servers and spec.get("swagger") == "2.0":
+            host = spec.get("host", "")
+            basePath = spec.get("basePath", "")
+            if host:
+                servers.append((host + basePath).rstrip("/"))
+        if not servers:
+            servers = [""]
+        paths = spec.get("paths", {}) or {}
+        for path, methods in paths.items():
+            if not isinstance(methods, dict):
+                continue
+            for method, op in methods.items():
+                if method.lower() not in ("get", "post", "put", "delete", "patch"):
+                    continue
+                op = op or {}
+                name = op.get("operationId") or f"{method.lower()}_{path.strip('/').replace('/', '_').replace('{','').replace('}','') or 'root'}"
+                summary = op.get("summary") or op.get("description") or ""
+                params: Dict[str, Any] = {}
+                for p in op.get("parameters", []) or []:
+                    pname = p.get("name")
+                    if not pname:
+                        continue
+                    params[pname] = p.get("schema") or p.get("example") or p.get("default") or None
+                if op.get("requestBody"):
+                    params["body"] = None
+                base = servers[0]
+                endpoint = base + path
+                entry = {
+                    "name": name,
+                    "description": summary,
+                    "type": "rest",
+                    "endpoint": endpoint,
+                    "method": method.upper(),
+                    "params": params,
+                }
+                entries.append(entry)
+        return entries
 
     def _validate_and_normalize(self, raw: Dict[str, Any]) -> Dict[str, Any]:
         if not isinstance(raw, dict):
