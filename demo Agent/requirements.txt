@@ -2,3 +2,14 @@ watchdog
 PyYAML
 requests
 flask
+agent-framework>=1.2.0
+agent-openapi>=0.1.0
+agent-watcher>=0.1.0
+threading
+logging
+json
+os
+time
+functools
+typing
+sys
